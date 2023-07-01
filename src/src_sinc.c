@@ -5,6 +5,7 @@
 ** This code is released under 2-clause BSD license. Please see the
 ** file at : https://github.com/libsndfile/libsamplerate/blob/master/COPYING
 */
+#include <fenv.h>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -373,6 +374,10 @@ calc_output_single (SINC_FILTER *filter, increment_t increment, increment_t star
 	increment_t	filter_index, max_filter_index ;
 	int			data_index, coeff_count, indx ;
 
+    fprintf(stderr, "c calc_output_single\n");
+    fprintf(stderr, "c increment %d\n", increment);
+    fprintf(stderr, "c start_filter_index %d\n", start_filter_index);
+
 	/* Convert input parameters into fixed point. */
 	max_filter_index = int_to_fp (filter->coeff_half_len) ;
 
@@ -456,37 +461,61 @@ sinc_mono_vari_process (SRC_STATE *state, SRC_DATA *data)
 	count = (filter->coeff_half_len + 2.0) / filter->index_inc ;
 	if (MIN (state->last_ratio, data->src_ratio) < 1.0)
 		count /= MIN (state->last_ratio, data->src_ratio) ;
+    fprintf(stderr, "c count %f\n", count);
 
 	/* Maximum coefficientson either side of center point. */
 	half_filter_chan_len = state->channels * (int) (psf_lrint (count) + 1) ;
+    fprintf(stderr, "c half_filter_chan_len %d\n", half_filter_chan_len);
 
 	input_index = state->last_position ;
+
+    switch (fegetround()) {
+    case FE_DOWNWARD: fprintf (stderr, "downward"); break;
+    case FE_TONEAREST: fprintf (stderr, "to-nearest"); break;
+    case FE_TOWARDZERO: fprintf (stderr, "toward-zero"); break;
+    case FE_UPWARD: fprintf (stderr, "upward"); break;
+    default: fprintf (stderr, "unknown");
+    }
+    fprintf(stderr, "c input_index %f\n", input_index);
+    fprintf(stderr, "c b_current %d\n", filter->b_current);
+    fprintf(stderr, "c b_len %d\n", filter->b_len);
 
 	rem = fmod_one (input_index) ;
 	filter->b_current = (filter->b_current + state->channels * psf_lrint (input_index - rem)) % filter->b_len ;
 	input_index = rem ;
+    fprintf(stderr, "c input_index %f\n", rem);
+    fprintf(stderr, "c b_current %d\n", filter->b_current);
 
 	terminate = 1.0 / src_ratio + 1e-20 ;
 
 	/* Main processing loop. */
+    fprintf(stderr, "c out_gen %ld\n", filter->out_gen);
+    fprintf(stderr, "c out_count %ld\n", filter->out_count);
 	while (filter->out_gen < filter->out_count)
 	{
 		/* Need to reload buffer? */
 		samples_in_hand = (filter->b_end - filter->b_current + filter->b_len) % filter->b_len ;
+        fprintf(stderr, "c samples_in_hand %d\n", samples_in_hand);
 
 		if (samples_in_hand <= half_filter_chan_len)
 		{	if ((state->error = prepare_data (filter, state->channels, data, half_filter_chan_len)) != 0)
 				return state->error ;
 
 			samples_in_hand = (filter->b_end - filter->b_current + filter->b_len) % filter->b_len ;
-			if (samples_in_hand <= half_filter_chan_len)
+            fprintf(stderr, "c samples_in_hand %d\n", samples_in_hand);
+			if (samples_in_hand <= half_filter_chan_len) {
+                      fprintf(stderr, "samples_in_hand <= half_filter_chan_len\n");
 				break ;
+            }
 			} ;
 
 		/* This is the termination condition. */
 		if (filter->b_real_end >= 0)
-		{	if (filter->b_current + input_index + terminate > filter->b_real_end)
+          {	if (filter->b_current + input_index + terminate > filter->b_real_end) {
+                      fprintf(stderr, "filter->b_current + input_index + terminate > filter->b_real_end\n");
+
 				break ;
+            }
 			} ;
 
 		if (filter->out_count > 0 && fabs (state->last_ratio - data->src_ratio) > 1e-10)
@@ -514,8 +543,12 @@ sinc_mono_vari_process (SRC_STATE *state, SRC_DATA *data)
 	/* Save current ratio rather then target ratio. */
 	state->last_ratio = src_ratio ;
 
+    fprintf(stderr, "c last_position %f\n", input_index);
+
 	data->input_frames_used = filter->in_used / state->channels ;
 	data->output_frames_gen = filter->out_gen / state->channels ;
+    fprintf(stderr, "c input_frames_used %ld\n", data->input_frames_used);
+    fprintf(stderr, "c output_frames_gen %ld\n", data->output_frames_gen);
 
 	return SRC_ERR_NO_ERROR ;
 } /* sinc_mono_vari_process */
